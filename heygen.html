@@ -102,6 +102,22 @@
         id="status"
         class="p-2.5 bg-gray-50 border border-gray-300 rounded-md h-[100px] overflow-y-auto font-mono text-sm"
       ></div>
+
+      <div class="flex gap-2 mt-4">
+        <button
+          id="recordButton"
+          class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition-colors hidden"
+        >
+          Start Recording
+        </button>
+        <button
+          id="downloadButton"
+          class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors hidden"
+          disabled
+        >
+          Download Recording
+        </button>
+      </div>
     </div>
 
     <script>
@@ -121,6 +137,11 @@
       let poseVideo = null;
       let poseCanvas = null;
       let poseCtx = null;
+      let isRecording = false;
+      let recordedPoses = [];
+      let lastRecordedTime = 0;
+      let exerciseBuffer = [];
+      const BUFFER_SIZE = 3;
 
       // DOM Elements
       const statusElement = document.getElementById("status");
@@ -283,6 +304,8 @@
 
         document.querySelector("#startBtn").disabled = true;
         updateStatus("Streaming started successfully");
+
+        showRecordingButtons();
       }
 
       // Send text to avatar
@@ -395,6 +418,130 @@
         detectPose();
       }
 
+      function getAngleBetweenPoints(a, b, c) {
+        const vectorAB = {
+          x: b.x - a.x,
+          y: b.y - a.y,
+        };
+        const vectorBC = {
+          x: c.x - b.x,
+          y: c.y - b.y,
+        };
+
+        const dotProduct = vectorAB.x * vectorBC.x + vectorAB.y * vectorBC.y;
+        const magnitudeAB = Math.sqrt(
+          vectorAB.x * vectorAB.x + vectorAB.y * vectorAB.y
+        );
+        const magnitudeBC = Math.sqrt(
+          vectorBC.x * vectorBC.x + vectorBC.y * vectorBC.y
+        );
+        const angleRadians = Math.acos(
+          dotProduct / (magnitudeAB * magnitudeBC)
+        );
+        return 180 - (angleRadians * 180) / Math.PI;
+      }
+
+      async function analyzePose(poses) {
+        if (!poses.length) return null;
+
+        const pose = poses[0];
+        const kp = Object.fromEntries(
+          pose.keypoints.filter((k) => k.score > 0.5).map((k) => [k.name, k])
+        );
+
+        const angles = {};
+        const analysis = {};
+
+        // Calculate joint angles
+        if (kp.right_hip && kp.right_knee && kp.right_ankle) {
+          angles.rightKnee = getAngleBetweenPoints(
+            kp.right_hip,
+            kp.right_knee,
+            kp.right_ankle
+          );
+        }
+        if (kp.left_hip && kp.left_knee && kp.left_ankle) {
+          angles.leftKnee = getAngleBetweenPoints(
+            kp.left_hip,
+            kp.left_knee,
+            kp.left_ankle
+          );
+        }
+        if (kp.right_shoulder && kp.right_elbow && kp.right_wrist) {
+          angles.rightElbow = getAngleBetweenPoints(
+            kp.right_shoulder,
+            kp.right_elbow,
+            kp.right_wrist
+          );
+        }
+        if (kp.left_shoulder && kp.left_elbow && kp.left_wrist) {
+          angles.leftElbow = getAngleBetweenPoints(
+            kp.left_shoulder,
+            kp.left_elbow,
+            kp.left_wrist
+          );
+        }
+
+        // Spine analysis
+        if (
+          kp.nose &&
+          kp.left_shoulder &&
+          kp.right_shoulder &&
+          kp.left_hip &&
+          kp.right_hip
+        ) {
+          const shoulderMidpoint = {
+            x: (kp.left_shoulder.x + kp.right_shoulder.x) / 2,
+            y: (kp.left_shoulder.y + kp.right_shoulder.y) / 2,
+          };
+          const hipMidpoint = {
+            x: (kp.left_hip.x + kp.right_hip.x) / 2,
+            y: (kp.left_hip.y + kp.right_hip.y) / 2,
+          };
+
+          angles.torso =
+            Math.atan2(
+              shoulderMidpoint.y - hipMidpoint.y,
+              shoulderMidpoint.x - hipMidpoint.x
+            ) *
+            (180 / Math.PI);
+
+          analysis.spine = {
+            forward_angle: angles.torso,
+            lateral_deviation: shoulderMidpoint.x - hipMidpoint.x,
+            head_offset: kp.nose.x - shoulderMidpoint.x,
+          };
+        }
+
+        // Add relative heights
+        if (kp.nose && kp.left_shoulder && kp.right_shoulder) {
+          analysis.heights = {
+            head_to_shoulder:
+              kp.nose.y - (kp.left_shoulder.y + kp.right_shoulder.y) / 2,
+            shoulder_to_hip:
+              kp.left_shoulder && kp.left_hip
+                ? Math.abs(kp.left_shoulder.y - kp.left_hip.y)
+                : null,
+            hip_to_ankle:
+              kp.left_hip && kp.left_ankle
+                ? Math.abs(kp.left_hip.y - kp.left_ankle.y)
+                : null,
+          };
+        }
+
+        return {
+          timestamp: Date.now(),
+          angles,
+          analysis,
+          keypoints: Object.entries(kp).map(([name, point]) => ({
+            name,
+            x: point.x,
+            y: point.y,
+          })),
+        };
+      }
+
+      // Modify the detectPose function to include recording logic
       async function detectPose() {
         if (!poseDetector) return;
 
@@ -462,8 +609,103 @@
           });
         });
 
+        if (isRecording) {
+          const currentTime = Date.now();
+          if (currentTime - lastRecordedTime >= 200) {
+            const analysis = await analyzePose(poses);
+            if (analysis) {
+              recordedPoses.push(analysis);
+
+              // Send last 10 frames (2 seconds worth at 5fps) of data to LLM every 2 seconds
+              if (recordedPoses.length % 10 === 0) {
+                const last10Frames = recordedPoses.slice(-10);
+                const prompt = `You are an expert fitness coach watching someone exercise. Be motivating in your feedback. Analyze their movement patterns over the last 2 seconds and provide specific, actionable feedback. The user is trying to do a pushup. Focus on form issues and improvements needed. Keep feedback concise, 3 words max. If there is no feedback or not enough data, just say something encouraging.
+
+Here's the sequence of pose data:
+
+${last10Frames
+  .map(
+    (frame, i) => `
+Timeframe ${i + 1}:
+Angles:
+- Left knee: ${frame.angles.leftKnee?.toFixed(1)}°
+- Right knee: ${frame.angles.rightKnee?.toFixed(1)}°
+- Left elbow: ${frame.angles.leftElbow?.toFixed(1)}°
+- Right elbow: ${frame.angles.rightElbow?.toFixed(1)}°
+- Torso angle: ${frame.angles.torso?.toFixed(1)}°
+
+Spine:
+- Forward lean: ${frame.analysis.spine?.forward_angle?.toFixed(1)}°
+- Side lean: ${frame.analysis.spine?.lateral_deviation?.toFixed(1)}
+- Head position offset: ${frame.analysis.spine?.head_offset?.toFixed(1)}
+
+Heights:
+- Head to shoulder: ${frame.analysis.heights?.head_to_shoulder?.toFixed(1)}
+- Shoulder to hip: ${frame.analysis.heights?.shoulder_to_hip?.toFixed(1)}
+- Hip to ankle: ${frame.analysis.heights?.hip_to_ankle?.toFixed(1)}
+`
+  )
+  .join("\n")}
+
+Based on these movement patterns, what one liner feedback would you give?`;
+
+                await sendText(prompt, "talk");
+              }
+
+              lastRecordedTime = currentTime;
+            }
+          }
+        }
+
         requestAnimationFrame(detectPose);
       }
+
+      // Add these to your existing startStreamingSession function
+      function showRecordingButtons() {
+        document.getElementById("recordButton").classList.remove("hidden");
+        document.getElementById("downloadButton").classList.remove("hidden");
+      }
+
+      // Add these event listeners
+      document.getElementById("recordButton").addEventListener("click", () => {
+        isRecording = !isRecording;
+        const recordButton = document.getElementById("recordButton");
+        const downloadButton = document.getElementById("downloadButton");
+
+        if (isRecording) {
+          recordButton.textContent = "Stop Recording";
+          recordButton.classList.replace("bg-purple-500", "bg-red-500");
+          recordButton.classList.replace(
+            "hover:bg-purple-600",
+            "hover:bg-red-600"
+          );
+          downloadButton.disabled = true;
+          recordedPoses = [];
+        } else {
+          recordButton.textContent = "Start Recording";
+          recordButton.classList.replace("bg-red-500", "bg-purple-500");
+          recordButton.classList.replace(
+            "hover:bg-red-600",
+            "hover:bg-purple-600"
+          );
+          downloadButton.disabled = false;
+        }
+      });
+
+      document
+        .getElementById("downloadButton")
+        .addEventListener("click", () => {
+          const dataStr = JSON.stringify(recordedPoses, null, 2);
+          const blob = new Blob([dataStr], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `pose_analysis_${new Date().toISOString()}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        });
     </script>
   </body>
 </html>
