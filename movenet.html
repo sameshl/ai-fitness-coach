@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>MoveNet Pose Detection</title>
+    <style>
+      #videoContainer {
+        position: relative;
+        display: inline-block;
+      }
+      #videoInput,
+      #canvasOverlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 640px;
+        height: 480px;
+      }
+      #canvasOverlay {
+        z-index: 10;
+      }
+      #poseOutput {
+        text-align: left;
+        max-height: 300px;
+        overflow-y: scroll;
+        border: 1px solid #ddd;
+        padding: 10px;
+        margin-top: 500px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="videoContainer">
+      <video id="videoInput" width="640" height="480" autoplay></video>
+      <canvas id="canvasOverlay" width="640" height="480"></canvas>
+    </div>
+    <div id="poseOutput"></div>
+    <div style="margin-top: 10px">
+      <button id="recordButton">Start Recording</button>
+      <button id="downloadButton" disabled>Download Recording</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+    <script>
+      class PoseDetector {
+        constructor() {
+          this.videoInput = document.getElementById("videoInput");
+          this.canvasOverlay = document.getElementById("canvasOverlay");
+          this.poseOutput = document.getElementById("poseOutput");
+          this.ctx = this.canvasOverlay.getContext("2d");
+          this.recordButton = document.getElementById("recordButton");
+          this.downloadButton = document.getElementById("downloadButton");
+          this.isRecording = false;
+          this.recordedPoses = [];
+          this.lastRecordedTime = 0;
+
+          this.recordButton.addEventListener("click", () =>
+            this.toggleRecording()
+          );
+          this.downloadButton.addEventListener("click", () =>
+            this.downloadRecording()
+          );
+        }
+
+        async initCamera() {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
+          this.videoInput.srcObject = stream;
+          return new Promise((resolve) => {
+            this.videoInput.onloadedmetadata = () => {
+              this.videoInput.play();
+              resolve();
+            };
+          });
+        }
+
+        async initDetector() {
+          this.detector = await poseDetection.createDetector(
+            poseDetection.SupportedModels.MoveNet
+          );
+        }
+
+        drawKeypoints(poses) {
+          this.ctx.clearRect(
+            0,
+            0,
+            this.canvasOverlay.width,
+            this.canvasOverlay.height
+          );
+
+          poses.forEach((pose) => {
+            // Draw keypoints
+            pose.keypoints.forEach((keypoint) => {
+              if (keypoint.score > 0.5) {
+                this.ctx.beginPath();
+                this.ctx.arc(keypoint.x, keypoint.y, 5, 0, 2 * Math.PI);
+                this.ctx.fillStyle = "red";
+                this.ctx.fill();
+              }
+            });
+
+            // Draw skeleton connections
+            const connections = [
+              ["left_shoulder", "right_shoulder"],
+              ["left_hip", "right_hip"],
+              ["left_shoulder", "left_hip"],
+              ["right_shoulder", "right_hip"],
+              ["left_shoulder", "left_elbow"],
+              ["right_shoulder", "right_elbow"],
+              ["left_elbow", "left_wrist"],
+              ["right_elbow", "right_wrist"],
+              ["left_hip", "left_knee"],
+              ["right_hip", "right_knee"],
+              ["left_knee", "left_ankle"],
+              ["right_knee", "right_ankle"],
+            ];
+
+            this.ctx.strokeStyle = "blue";
+            this.ctx.lineWidth = 2;
+            connections.forEach(([from, to]) => {
+              const fromPoint = pose.keypoints.find((kp) => kp.name === from);
+              const toPoint = pose.keypoints.find((kp) => kp.name === to);
+
+              if (
+                fromPoint &&
+                toPoint &&
+                fromPoint.score > 0.5 &&
+                toPoint.score > 0.5
+              ) {
+                this.ctx.beginPath();
+                this.ctx.moveTo(fromPoint.x, fromPoint.y);
+                this.ctx.lineTo(toPoint.x, toPoint.y);
+                this.ctx.stroke();
+              }
+            });
+          });
+        }
+
+        displayPoseData(poses) {
+          const poseText = poses
+            .map(
+              (pose, index) =>
+                `Pose ${index + 1} (Score: ${pose.score.toFixed(2)}):\n` +
+                pose.keypoints
+                  .map(
+                    (kp) =>
+                      `${kp.name}: (x: ${kp.x.toFixed(2)}, y: ${kp.y.toFixed(
+                        2
+                      )}, score: ${kp.score.toFixed(2)})`
+                  )
+                  .join("\n")
+            )
+            .join("\n\n");
+
+          this.poseOutput.textContent = poseText;
+        }
+
+        toggleRecording() {
+          this.isRecording = !this.isRecording;
+          if (this.isRecording) {
+            this.recordButton.textContent = "Stop Recording";
+            this.recordedPoses = [];
+            this.downloadButton.disabled = true;
+          } else {
+            this.recordButton.textContent = "Start Recording";
+            this.downloadButton.disabled = false;
+          }
+        }
+
+        downloadRecording() {
+          const dataStr = JSON.stringify(this.recordedPoses, null, 2);
+          const blob = new Blob([dataStr], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `pose_recording_${new Date().toISOString()}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+
+        async startDetection() {
+          await this.initCamera();
+          await this.initDetector();
+
+          const processFrame = async () => {
+            const poses = await this.detector.estimatePoses(this.videoInput);
+
+            if (poses.length) {
+              this.drawKeypoints(poses);
+              this.displayPoseData(poses);
+
+              if (this.isRecording) {
+                const currentTime = Date.now();
+                if (currentTime - this.lastRecordedTime >= 1000) {
+                  // Create normalized poses
+                  const normalizedPoses = poses.map((pose) => ({
+                    ...pose,
+                    keypoints:
+                      poseDetection.calculators.keypointsToNormalizedKeypoints(
+                        pose.keypoints,
+                        {
+                          width: this.videoInput.width,
+                          height: this.videoInput.height,
+                        }
+                      ),
+                  }));
+
+                  this.recordedPoses.push({
+                    timestamp: currentTime,
+                    poses: normalizedPoses,
+                  });
+                  this.lastRecordedTime = currentTime;
+                }
+              }
+            }
+
+            requestAnimationFrame(processFrame);
+          };
+
+          processFrame();
+        }
+      }
+
+      const detector = new PoseDetector();
+      detector.startDetection();
+    </script>
+  </body>
+</html>
