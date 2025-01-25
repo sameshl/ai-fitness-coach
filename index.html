@@ -141,7 +141,7 @@
     <script>
       // Configuration
       const API_CONFIG = {
-        apiKey: "NTRiOTVmYmFiYTVmNDIxM2E5ZjkyZDcyNDI5ZWQzM2ItMTczNzc5NTY1Ng==",
+        apiKey: "MTFhNDYzZmU4NmMwNGE0MTk5ZWE5NTM5ODI0YzFlNTUtMTczNzc4Nzc1MQ==",
         serverUrl: "https://api.heygen.com",
       };
 
@@ -162,9 +162,10 @@
       const BUFFER_SIZE = 3;
       let cameraStream = null;
       let lastRepTime = 0;
-      const REP_COOLDOWN = 2000; // Keep 2 seconds between LLM calls
-      const FRAMES_PER_REP = 40; // Store last 40 frames (2 seconds at 20fps)
+      const REP_COOLDOWN = 4000; // Increased from 1000ms to 4000ms (4x slower)
+      const FRAMES_PER_REP = 40; // 4 seconds at 10fps (reduced from 80)
       let savedPrompts = [];
+      let recordingStartTimeout = null;
 
       // DOM Elements
       const statusElement = document.getElementById("status");
@@ -400,6 +401,11 @@
         document.querySelector("#startBtn").disabled = false;
 
         updateStatus("Session closed");
+
+        if (recordingStartTimeout) {
+          clearTimeout(recordingStartTimeout);
+          recordingStartTimeout = null;
+        }
       }
 
       // Event Listeners
@@ -522,7 +528,6 @@
         if (!poses.length) return null;
 
         const pose = poses[0];
-        // Only consider keypoints with high confidence
         const kp = Object.fromEntries(
           pose.keypoints.filter((k) => k.score > 0.5).map((k) => [k.name, k])
         );
@@ -530,105 +535,81 @@
         const angles = {};
         const analysis = {};
 
-        // Calculate angles only if we have all required points
-        if (kp.left_shoulder && kp.left_elbow && kp.left_wrist) {
-          angles.leftElbow = getAngleBetweenPoints(
-            kp.left_shoulder,
-            kp.left_elbow,
-            kp.left_wrist
+        // Calculate midpoints with null checks
+        const shoulderMidpoint =
+          kp.left_shoulder && kp.right_shoulder
+            ? {
+                x: (kp.left_shoulder.x + kp.right_shoulder.x) / 2,
+                y: (kp.left_shoulder.y + kp.right_shoulder.y) / 2,
+              }
+            : null;
+
+        const hipMidpoint =
+          kp.left_hip && kp.right_hip
+            ? {
+                x: (kp.left_hip.x + kp.right_hip.x) / 2,
+                y: (kp.left_hip.y + kp.right_hip.y) / 2,
+              }
+            : null;
+
+        const ankleMidpoint =
+          kp.left_ankle && kp.right_ankle
+            ? {
+                x: (kp.left_ankle.x + kp.right_ankle.x) / 2,
+                y: (kp.left_ankle.y + kp.right_ankle.y) / 2,
+              }
+            : null;
+
+        // 1. Pushup-specific measurements
+        analysis.pushup = {};
+
+        // Body alignment with null check
+        if (shoulderMidpoint && hipMidpoint && ankleMidpoint) {
+          const angle = getAngleBetweenPoints(
+            shoulderMidpoint,
+            hipMidpoint,
+            ankleMidpoint
           );
+          if (!isNaN(angle)) analysis.pushup.plankAlignment = angle;
         }
 
-        if (kp.right_shoulder && kp.right_elbow && kp.right_wrist) {
-          angles.rightElbow = getAngleBetweenPoints(
-            kp.right_shoulder,
-            kp.right_elbow,
-            kp.right_wrist
-          );
+        // Height with null check
+        if (kp.left_shoulder && kp.right_shoulder) {
+          const height = Math.min(kp.left_shoulder.y, kp.right_shoulder.y);
+          if (!isNaN(height)) analysis.pushup.height = height;
         }
 
-        // Spine analysis
-        if (
-          kp.nose &&
-          kp.left_shoulder &&
-          kp.right_shoulder &&
-          kp.left_hip &&
-          kp.right_hip
-        ) {
-          const shoulderMidpoint = {
-            x: (kp.left_shoulder.x + kp.right_shoulder.x) / 2,
-            y: (kp.left_shoulder.y + kp.right_shoulder.y) / 2,
-          };
-          const hipMidpoint = {
-            x: (kp.left_hip.x + kp.right_hip.x) / 2,
-            y: (kp.left_hip.y + kp.right_hip.y) / 2,
-          };
-
-          angles.torso =
-            Math.atan2(
-              shoulderMidpoint.y - hipMidpoint.y,
-              shoulderMidpoint.x - hipMidpoint.x
-            ) *
-            (180 / Math.PI);
-
-          analysis.spine = {
-            forward_angle: angles.torso,
-            lateral_deviation: shoulderMidpoint.x - hipMidpoint.x,
-            head_offset: kp.nose.x - shoulderMidpoint.x,
-          };
-        }
-
-        // Heights analysis
-        if (kp.nose && kp.left_shoulder && kp.right_shoulder) {
-          analysis.heights = {
-            head_to_shoulder:
-              kp.nose.y - (kp.left_shoulder.y + kp.right_shoulder.y) / 2,
-            shoulder_to_hip:
-              kp.left_shoulder && kp.left_hip
-                ? Math.abs(kp.left_shoulder.y - kp.left_hip.y)
-                : null,
-            hip_to_ankle:
-              kp.left_hip && kp.left_ankle
-                ? Math.abs(kp.left_hip.y - kp.left_ankle.y)
-                : null,
-          };
-        }
-
-        // Only return values that were successfully calculated
-        const cleanAngles = Object.fromEntries(
-          Object.entries(angles).filter(
-            ([_, v]) => v !== undefined && !isNaN(v)
-          )
-        );
-
-        const cleanAnalysis = {
-          spine: analysis.spine
-            ? Object.fromEntries(
-                Object.entries(analysis.spine).filter(
-                  ([_, v]) => v !== undefined && !isNaN(v)
-                )
-              )
-            : undefined,
-          heights: analysis.heights
-            ? Object.fromEntries(
-                Object.entries(analysis.heights).filter(
-                  ([_, v]) => v !== undefined && !isNaN(v)
-                )
-              )
-            : undefined,
-        };
-
-        return {
+        // Format the prompt data, filtering out undefined/NaN values
+        const promptData = {
           timestamp: Date.now(),
-          angles: cleanAngles,
-          analysis: cleanAnalysis,
-          keypoints: Object.values(kp).map((point) => ({
-            name: point.name,
-            x: point.x,
-            y: point.y,
-            score: point.score,
-          })),
+          analysis: {
+            pushup: Object.entries(analysis.pushup)
+              .filter(
+                ([_, v]) =>
+                  v != null &&
+                  (typeof v === "number"
+                    ? !isNaN(v)
+                    : Object.values(v).every((x) => !isNaN(x)))
+              )
+              .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {}),
+          },
+          keypoints: Object.values(kp)
+            .filter(
+              (point) =>
+                point &&
+                !isNaN(point.x) &&
+                !isNaN(point.y) &&
+                !isNaN(point.score)
+            )
+            .map((point) => ({
+              name: point.name,
+              x: point.x,
+              y: point.y,
+              score: point.score,
+            })),
         };
+
+        return promptData;
       }
 
       // Modify the detectPose function to include recording logic
@@ -701,8 +682,8 @@
 
         if (isRecording) {
           const currentTime = Date.now();
-          // Record at 20fps (50ms) for smoother analysis
-          if (currentTime - lastRecordedTime >= 50) {
+          // Keep 10fps recording rate (100ms instead of 50ms)
+          if (currentTime - lastRecordedTime >= 100) {
             const analysis = await analyzePose(poses);
             if (analysis) {
               recordedPoses.push(analysis);
@@ -710,63 +691,49 @@
                 recordedPoses.shift();
               }
 
+              // Send to LLM every 1 second
               if (currentTime - lastRepTime >= REP_COOLDOWN) {
-                const prompt = `You are a supportive personal trainer watching someone do pushups from a side view (primarily seeing their left side). You understand that pose detection may not be perfect, so be thoughtful with your feedback.
+                const prompt = `You are a supportive personal trainer watching someone do pushups from a side view. You're analyzing a 4-second window of movement at 10fps.
 
-Core responsibilities:
-1. Focus on clear, major form issues only
-2. Be encouraging about good form
-3. Account for pose detection limitations
+Data Explanation:
+- Plank alignment: Overall body straightness (180° = perfectly straight)
+- Height: Vertical position (higher = up, lower = down)
 
 Response rules:
-- Keep feedback to 2-5 words
+- Max 3-4 words
+- Be generous in plank alignment rules as the user is a beginner
+- Only respond for:
+  * Completed reps with good form
+  * Major form breaks:
+    - Plank alignment > 220° or < 120° (broken line)
+  * Exceptional form throughout rep
+- Focus only on severe form breaks
+- Normal movement variation is fine
 - If unsure, don't respond
-- Never say "silent" or similar words
-- Be more encouraging than critical
-- Consider that we mainly see the left side
+- Never say "silent" or "i didn't catch that" or similar words
 
-Key pushup form elements to watch (accounting for side view):
-- Visible elbow angle (looking for ~90° at bottom)
-- Body line from head to heel
-- Major height changes (for rep counting)
-- Obvious back sagging
-- Clear speed issues
-
-Movement data (last 2s at 20fps):
+Last 4 seconds of movement (10fps):
 ${recordedPoses
   .map(
     (frame, i) => `
 Frame ${i + 1}:
-Elbow angles: L=${frame.angles.leftElbow?.toFixed(
-      1
-    )}° R=${frame.angles.rightElbow?.toFixed(1)}°
-Spine angle: ${frame.analysis.spine?.forward_angle?.toFixed(1)}°
-Height: ${frame.analysis.heights?.shoulder_to_hip?.toFixed(1)}
+Plank: ${frame.analysis.pushup.plankAlignment?.toFixed(1)}°
+Height: ${frame.analysis.pushup.height?.toFixed(1)}
 `
   )
   .join("\n")}
 
-Response examples:
-Major form corrections (use very sparingly, only when confident):
-- "Lower a bit more"
-- "Keep body straight"
-- "Slow it down"
-- "Control the descent"
-
-Positive feedback (use more often):
-- "Great depth!"
-- "Nice control"
-- "Strong pushup"
-- "Keeping good form"
-- "Solid pace"
-- "Looking powerful"
+Response types:
+Rep completion: "Great rep!" / "Nice work!" / "Strong push!"
+Major form issues: "Hips way too high" / "Plank alignment broken"
+Excellence: "Perfect form" / "Looking strong" / "Solid control"
 
 Remember: 
-- Be conservative with form corrections due to pose detection limitations
-- Focus on obvious, major form issues only
-- Default to encouragement when form looks generally good
-- Consider that some angles might be imperfect due to side view
-- If unsure about form, lean towards encouragement or don't respond`;
+- Only flag severe form breaks
+- Normal variation is fine
+- Consider pose detection limitations
+- If unsure, wait for next window
+- Don't say "silent" or similar words or "not a rep yet"`;
 
                 // Save prompt with timestamp
                 savedPrompts.push({
@@ -794,15 +761,15 @@ Remember:
           .classList.remove("hidden");
       }
 
-      // Add these event listeners
+      // Update the record button click handler
       document.getElementById("recordButton").addEventListener("click", () => {
-        isRecording = !isRecording;
         const recordButton = document.getElementById("recordButton");
         const downloadButton = document.getElementById("downloadButton");
         const downloadPromptsBtn =
           document.getElementById("downloadPromptsBtn");
 
-        if (isRecording) {
+        if (!isRecording) {
+          // Start recording after 2 second delay
           recordButton.textContent = "Stop Recording";
           recordButton.classList.replace("bg-purple-500", "bg-red-500");
           recordButton.classList.replace(
@@ -811,8 +778,20 @@ Remember:
           );
           downloadButton.disabled = true;
           downloadPromptsBtn.disabled = true;
-          recordedPoses = [];
+
+          recordingStartTimeout = setTimeout(() => {
+            isRecording = true;
+            recordedPoses = [];
+            lastRecordedTime = 0;
+            lastRepTime = 0;
+          }, 2000);
         } else {
+          // Stop recording immediately
+          if (recordingStartTimeout) {
+            clearTimeout(recordingStartTimeout);
+            recordingStartTimeout = null;
+          }
+          isRecording = false;
           recordButton.textContent = "Start Recording";
           recordButton.classList.replace("bg-red-500", "bg-purple-500");
           recordButton.classList.replace(
