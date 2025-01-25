@@ -125,7 +125,7 @@
     <script>
       // Configuration
       const API_CONFIG = {
-        apiKey: "MzEzOWJlNjc1ZjkyNDY2YzkzOTJiMmY5NGE2NDE5YWQtMTczNzcyMzIyMQ==",
+        apiKey: "NTRiOTVmYmFiYTVmNDIxM2E5ZjkyZDcyNDI5ZWQzM2ItMTczNzc5NTY1Ng==",
         serverUrl: "https://api.heygen.com",
       };
 
@@ -284,38 +284,44 @@
 
       // Start streaming session
       async function startStreamingSession() {
-        const hasPermission = await checkCameraPermissions();
-        if (!hasPermission) {
-          updateStatus(
-            "Camera permission denied. Please grant camera access and try again."
-          );
-          return;
-        }
-
-        const startResponse = await fetch(
-          `${API_CONFIG.serverUrl}/v1/streaming.start`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${sessionToken}`,
-            },
-            body: JSON.stringify({
-              session_id: sessionInfo.session_id,
-            }),
+        try {
+          // Check camera permissions first
+          const hasPermission = await checkCameraPermissions();
+          if (!hasPermission) {
+            updateStatus(
+              "Camera permission denied. Please grant camera access and try again."
+            );
+            return;
           }
-        );
 
-        await room.connect(sessionInfo.url, sessionInfo.access_token);
-        updateStatus("Connected to room");
+          // Initialize pose detection first
+          await initPoseDetection();
 
-        // Initialize pose detection
-        await initPoseDetection();
+          // Then start HeyGen stream
+          const startResponse = await fetch(
+            `${API_CONFIG.serverUrl}/v1/streaming.start`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${sessionToken}`,
+              },
+              body: JSON.stringify({
+                session_id: sessionInfo.session_id,
+              }),
+            }
+          );
 
-        document.querySelector("#startBtn").disabled = true;
-        updateStatus("Streaming started successfully");
+          await room.connect(sessionInfo.url, sessionInfo.access_token);
+          updateStatus("Connected to room");
 
-        showRecordingButtons();
+          document.querySelector("#startBtn").disabled = true;
+          updateStatus("Streaming started successfully");
+          showRecordingButtons();
+        } catch (error) {
+          updateStatus(`Error starting session: ${error.message}`);
+          console.error("Session start error:", error);
+        }
       }
 
       // Send text to avatar
@@ -388,8 +394,13 @@
       document
         .querySelector("#startBtn")
         .addEventListener("click", async () => {
-          await createNewSession();
-          await startStreamingSession();
+          try {
+            await createNewSession();
+            await startStreamingSession();
+          } catch (error) {
+            updateStatus(`Failed to start session: ${error.message}`);
+            console.error("Start session error:", error);
+          }
         });
       document
         .querySelector("#closeBtn")
@@ -472,12 +483,31 @@
         }
       }
 
-      // Add this helper function to check camera permissions
+      // Update the checkCameraPermissions function to be more robust
       async function checkCameraPermissions() {
         try {
-          await navigator.mediaDevices.getUserMedia({ video: true });
+          // First check if permissions are already granted
+          const permissions = await navigator.permissions.query({
+            name: "camera",
+          });
+          if (permissions.state === "granted") {
+            return true;
+          }
+
+          // If not granted, request them
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: "user",
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          });
+
+          // Clean up the test stream
+          stream.getTracks().forEach((track) => track.stop());
           return true;
         } catch (err) {
+          console.error("Camera permission error:", err);
           return false;
         }
       }
