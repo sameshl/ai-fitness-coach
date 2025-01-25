@@ -13,14 +13,21 @@
     <style>
       .video-container {
         position: relative;
-        display: inline-block;
-        margin: 10px;
+        display: block;
+        margin-bottom: 10px;
       }
       .pose-canvas {
         position: absolute;
         top: 0;
         left: 0;
         z-index: 10;
+      }
+
+      /* Make sure inputs and buttons stack nicely on mobile */
+      @media (max-width: 768px) {
+        .flex-wrap > * {
+          min-width: 100%;
+        }
       }
     </style>
   </head>
@@ -75,27 +82,22 @@
         </button>
       </div>
 
-      <div class="flex gap-4">
-        <div class="video-container">
+      <div class="flex flex-col md:flex-row gap-4 mb-5">
+        <div class="video-container w-full md:w-1/2">
           <video
             id="mediaElement"
-            class="w-[400px] max-h-[400px] border rounded-lg"
+            class="w-full aspect-video border rounded-lg"
             autoplay
           ></video>
         </div>
 
-        <div class="video-container">
+        <div class="video-container w-full md:w-1/2">
           <video
             id="poseVideo"
-            class="w-[400px] h-[400px] border rounded-lg"
+            class="w-full aspect-video border rounded-lg"
             autoplay
           ></video>
-          <canvas
-            id="poseCanvas"
-            class="pose-canvas"
-            width="400"
-            height="400"
-          ></canvas>
+          <canvas id="poseCanvas" class="pose-canvas w-full h-full"></canvas>
         </div>
       </div>
       <div
@@ -282,6 +284,14 @@
 
       // Start streaming session
       async function startStreamingSession() {
+        const hasPermission = await checkCameraPermissions();
+        if (!hasPermission) {
+          updateStatus(
+            "Camera permission denied. Please grant camera access and try again."
+          );
+          return;
+        }
+
         const startResponse = await fetch(
           `${API_CONFIG.serverUrl}/v1/streaming.start`,
           {
@@ -405,17 +415,71 @@
         poseCanvas = document.getElementById("poseCanvas");
         poseCtx = poseCanvas.getContext("2d");
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
-        poseVideo.srcObject = stream;
-        await poseVideo.play();
+        // Set canvas size to match video container
+        const resizeCanvas = () => {
+          poseCanvas.width = poseVideo.clientWidth;
+          poseCanvas.height = poseVideo.clientHeight;
+        };
 
-        poseDetector = await poseDetection.createDetector(
-          poseDetection.SupportedModels.MoveNet
-        );
+        // Initial resize
+        resizeCanvas();
 
-        detectPose();
+        // Resize canvas when window resizes
+        window.addEventListener("resize", resizeCanvas);
+
+        try {
+          // Check if mediaDevices is supported
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            // Fallback for older browsers
+            const getUserMedia =
+              navigator.getUserMedia ||
+              navigator.webkitGetUserMedia ||
+              navigator.mozGetUserMedia ||
+              navigator.msGetUserMedia;
+
+            if (!getUserMedia) {
+              throw new Error("getUserMedia is not supported in this browser");
+            }
+          }
+
+          const constraints = {
+            video: {
+              facingMode: "user", // Use front camera for mobile
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          };
+
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          poseVideo.srcObject = stream;
+          await new Promise((resolve) => {
+            poseVideo.onloadedmetadata = () => {
+              resolve();
+            };
+          });
+          await poseVideo.play();
+
+          poseDetector = await poseDetection.createDetector(
+            poseDetection.SupportedModels.MoveNet
+          );
+
+          detectPose();
+        } catch (error) {
+          console.error("Error accessing camera:", error);
+          updateStatus(
+            `Camera error: ${error.message}. Please ensure camera permissions are granted.`
+          );
+        }
+      }
+
+      // Add this helper function to check camera permissions
+      async function checkCameraPermissions() {
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: true });
+          return true;
+        } catch (err) {
+          return false;
+        }
       }
 
       function getAngleBetweenPoints(a, b, c) {
