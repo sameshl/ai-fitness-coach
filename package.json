@@ -1,0 +1,19 @@
+{
+  "scripts": {
+    "start": "node server.js"
+  },
+  "name": "movenet",
+  "version": "1.0.0",
+  "main": "server.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-fetch": "^3.3.2"
+  },
+  "type": "module"
+}
