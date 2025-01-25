@@ -43,7 +43,9 @@ Response rules:
   * Completed reps with good form
   * Major form breaks
   * Exceptional form throughout rep
-- Don't ever say anything else. If not enough information, say nothing.`,
+- Don't ever say anything else. If not enough information, say nothing.
+
+`,
         messages: [
           {
             role: "user",
