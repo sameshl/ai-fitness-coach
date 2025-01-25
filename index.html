@@ -10,6 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Permissions-Policy" content="camera=*, microphone=*" />
     <style>
       .video-container {
         position: relative;
@@ -82,6 +83,15 @@
         </button>
       </div>
 
+      <div class="flex flex-wrap gap-2.5 mb-5">
+        <button
+          id="cameraPermissionBtn"
+          class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+        >
+          Enable Camera
+        </button>
+      </div>
+
       <div class="flex flex-col md:flex-row gap-4 mb-5">
         <div class="video-container w-full md:w-1/2">
           <video
@@ -144,6 +154,7 @@
       let lastRecordedTime = 0;
       let exerciseBuffer = [];
       const BUFFER_SIZE = 3;
+      let cameraStream = null;
 
       // DOM Elements
       const statusElement = document.getElementById("status");
@@ -285,15 +296,6 @@
       // Start streaming session
       async function startStreamingSession() {
         try {
-          // Check camera permissions first
-          const hasPermission = await checkCameraPermissions();
-          if (!hasPermission) {
-            updateStatus(
-              "Camera permission denied. Please grant camera access and try again."
-            );
-            return;
-          }
-
           // Initialize pose detection first
           await initPoseDetection();
 
@@ -395,6 +397,10 @@
         .querySelector("#startBtn")
         .addEventListener("click", async () => {
           try {
+            if (!cameraStream) {
+              updateStatus("Please enable camera access first");
+              return;
+            }
             await createNewSession();
             await startStreamingSession();
           } catch (error) {
@@ -426,47 +432,23 @@
         poseCanvas = document.getElementById("poseCanvas");
         poseCtx = poseCanvas.getContext("2d");
 
-        // Set canvas size to match video container
         const resizeCanvas = () => {
           poseCanvas.width = poseVideo.clientWidth;
           poseCanvas.height = poseVideo.clientHeight;
         };
 
-        // Initial resize
         resizeCanvas();
-
-        // Resize canvas when window resizes
         window.addEventListener("resize", resizeCanvas);
 
         try {
-          // Check if mediaDevices is supported
-          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            // Fallback for older browsers
-            const getUserMedia =
-              navigator.getUserMedia ||
-              navigator.webkitGetUserMedia ||
-              navigator.mozGetUserMedia ||
-              navigator.msGetUserMedia;
-
-            if (!getUserMedia) {
-              throw new Error("getUserMedia is not supported in this browser");
-            }
+          // Use the existing camera stream
+          if (!cameraStream) {
+            throw new Error("Camera permission not granted");
           }
 
-          const constraints = {
-            video: {
-              facingMode: "user", // Use front camera for mobile
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-          };
-
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
-          poseVideo.srcObject = stream;
+          poseVideo.srcObject = cameraStream;
           await new Promise((resolve) => {
-            poseVideo.onloadedmetadata = () => {
-              resolve();
-            };
+            poseVideo.onloadedmetadata = () => resolve();
           });
           await poseVideo.play();
 
@@ -476,25 +458,16 @@
 
           detectPose();
         } catch (error) {
-          console.error("Error accessing camera:", error);
-          updateStatus(
-            `Camera error: ${error.message}. Please ensure camera permissions are granted.`
-          );
+          console.error("Error in pose detection setup:", error);
+          updateStatus(`Camera setup error: ${error.message}`);
+          throw error;
         }
       }
 
-      // Update the checkCameraPermissions function to be more robust
+      // Update the checkCameraPermissions function
       async function checkCameraPermissions() {
         try {
-          // First check if permissions are already granted
-          const permissions = await navigator.permissions.query({
-            name: "camera",
-          });
-          if (permissions.state === "granted") {
-            return true;
-          }
-
-          // If not granted, request them
+          // On mobile, we need to directly try getting the stream
           const stream = await navigator.mediaDevices.getUserMedia({
             video: {
               facingMode: "user",
@@ -503,12 +476,12 @@
             },
           });
 
-          // Clean up the test stream
-          stream.getTracks().forEach((track) => track.stop());
-          return true;
+          // Keep this stream alive - don't stop it
+          // We'll use it in initPoseDetection
+          return stream;
         } catch (err) {
           console.error("Camera permission error:", err);
-          return false;
+          return null;
         }
       }
 
@@ -800,6 +773,40 @@ Based on these movement patterns, what one liner feedback would you give?`;
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
         });
+
+      // Add this new function
+      async function requestCameraPermission() {
+        try {
+          cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: "user",
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          });
+
+          // Hide the camera permission button once we have access
+          document.getElementById("cameraPermissionBtn").style.display = "none";
+
+          // Enable the start button
+          document.getElementById("startBtn").disabled = false;
+
+          updateStatus("Camera permission granted");
+          return true;
+        } catch (err) {
+          console.error("Camera permission error:", err);
+          updateStatus(`Failed to get camera permission: ${err.message}`);
+          return false;
+        }
+      }
+
+      // Add camera permission button event listener
+      document
+        .getElementById("cameraPermissionBtn")
+        .addEventListener("click", requestCameraPermission);
+
+      // Initially disable the start button until camera permission is granted
+      document.getElementById("startBtn").disabled = true;
     </script>
   </body>
 </html>
