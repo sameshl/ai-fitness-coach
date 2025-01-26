@@ -92,6 +92,16 @@
         </button>
       </div>
 
+      <div class="flex flex-wrap gap-2.5 mb-5">
+        <select
+          id="exerciseSelect"
+          class="px-4 py-2 border border-gray-300 rounded-md"
+        >
+          <option value="pushups">Push-ups</option>
+          <option value="bicepCurls">Bicep Curls</option>
+        </select>
+      </div>
+
       <div class="flex flex-col md:flex-row gap-4 mb-5">
         <div class="video-container w-full md:w-1/2">
           <video
@@ -141,7 +151,7 @@
     <script>
       // Configuration
       const API_CONFIG = {
-        apiKey: "MWJjNWU3NzkzMzY2NGQ1ZTkzNjY0YzYxODJhOTljMzAtMTczNzg0MjQxOQ==",
+        apiKey: "ZjNjNDZlOTQ0N2NkNDI1Yzg1OWZmMjIyNGNiMzM5OWYtMTczNzg1OTM2Mw==",
         serverUrl: "https://api.heygen.com",
       };
 
@@ -531,67 +541,112 @@
           pose.keypoints.filter((k) => k.score > 0.5).map((k) => [k.name, k])
         );
 
-        const angles = {};
         const analysis = {};
+        const exerciseType = document.getElementById("exerciseSelect").value;
 
-        // Calculate midpoints with null checks
-        const shoulderMidpoint =
-          kp.left_shoulder && kp.right_shoulder
-            ? {
-                x: (kp.left_shoulder.x + kp.right_shoulder.x) / 2,
-                y: (kp.left_shoulder.y + kp.right_shoulder.y) / 2,
-              }
-            : null;
+        if (exerciseType === "pushups") {
+          // Calculate midpoints with null checks
+          const shoulderMidpoint =
+            kp.left_shoulder && kp.right_shoulder
+              ? {
+                  x: (kp.left_shoulder.x + kp.right_shoulder.x) / 2,
+                  y: (kp.left_shoulder.y + kp.right_shoulder.y) / 2,
+                }
+              : null;
 
-        const hipMidpoint =
-          kp.left_hip && kp.right_hip
-            ? {
-                x: (kp.left_hip.x + kp.right_hip.x) / 2,
-                y: (kp.left_hip.y + kp.right_hip.y) / 2,
-              }
-            : null;
+          const hipMidpoint =
+            kp.left_hip && kp.right_hip
+              ? {
+                  x: (kp.left_hip.x + kp.right_hip.x) / 2,
+                  y: (kp.left_hip.y + kp.right_hip.y) / 2,
+                }
+              : null;
 
-        const ankleMidpoint =
-          kp.left_ankle && kp.right_ankle
-            ? {
-                x: (kp.left_ankle.x + kp.right_ankle.x) / 2,
-                y: (kp.left_ankle.y + kp.right_ankle.y) / 2,
-              }
-            : null;
+          const ankleMidpoint =
+            kp.left_ankle && kp.right_ankle
+              ? {
+                  x: (kp.left_ankle.x + kp.right_ankle.x) / 2,
+                  y: (kp.left_ankle.y + kp.right_ankle.y) / 2,
+                }
+              : null;
 
-        // 1. Pushup-specific measurements
-        analysis.pushup = {};
+          // 1. Pushup-specific measurements
+          analysis.pushup = {};
 
-        // Body alignment with null check
-        if (shoulderMidpoint && hipMidpoint && ankleMidpoint) {
-          const angle = getAngleBetweenPoints(
-            shoulderMidpoint,
-            hipMidpoint,
-            ankleMidpoint
-          );
-          if (!isNaN(angle)) analysis.pushup.plankAlignment = angle;
+          // Body alignment with null check
+          if (shoulderMidpoint && hipMidpoint && ankleMidpoint) {
+            const angle = getAngleBetweenPoints(
+              shoulderMidpoint,
+              hipMidpoint,
+              ankleMidpoint
+            );
+            if (!isNaN(angle)) analysis.pushup.plankAlignment = angle;
+          }
+
+          // Height with null check
+          if (kp.left_shoulder && kp.right_shoulder) {
+            const height = Math.min(kp.left_shoulder.y, kp.right_shoulder.y);
+            if (!isNaN(height)) analysis.pushup.height = height;
+          }
+        } else if (exerciseType === "bicepCurls") {
+          analysis.bicepCurls = {};
+
+          // Calculate arm angles for both arms
+          if (kp.left_shoulder && kp.left_elbow && kp.left_wrist) {
+            const leftArmAngle = getAngleBetweenPoints(
+              kp.left_shoulder,
+              kp.left_elbow,
+              kp.left_wrist
+            );
+            analysis.bicepCurls.leftArmAngle = leftArmAngle;
+          }
+
+          if (kp.right_shoulder && kp.right_elbow && kp.right_wrist) {
+            const rightArmAngle = getAngleBetweenPoints(
+              kp.right_shoulder,
+              kp.right_elbow,
+              kp.right_wrist
+            );
+            analysis.bicepCurls.rightArmAngle = rightArmAngle;
+          }
+
+          // Calculate arm tuck with normalization and smoothing
+          const shoulderWidth =
+            kp.left_shoulder && kp.right_shoulder
+              ? Math.abs(kp.right_shoulder.x - kp.left_shoulder.x)
+              : 0;
+
+          if (shoulderWidth > 0) {
+            // Normalize tuck relative to shoulder width
+            if (kp.left_shoulder && kp.left_elbow) {
+              const leftTuck = Math.abs(kp.left_elbow.x - kp.left_shoulder.x);
+              // Convert to percentage of shoulder width and cap at 100%
+              const normalizedLeftTuck = Math.min(
+                (leftTuck / shoulderWidth) * 100,
+                100
+              );
+              // Add some smoothing - consider anything under 50% as good form
+              analysis.bicepCurls.leftTuck =
+                normalizedLeftTuck < 50 ? 0 : normalizedLeftTuck - 50;
+            }
+
+            if (kp.right_shoulder && kp.right_elbow) {
+              const rightTuck = Math.abs(
+                kp.right_elbow.x - kp.right_shoulder.x
+              );
+              const normalizedRightTuck = Math.min(
+                (rightTuck / shoulderWidth) * 100,
+                100
+              );
+              analysis.bicepCurls.rightTuck =
+                normalizedRightTuck < 50 ? 0 : normalizedRightTuck - 50;
+            }
+          }
         }
 
-        // Height with null check
-        if (kp.left_shoulder && kp.right_shoulder) {
-          const height = Math.min(kp.left_shoulder.y, kp.right_shoulder.y);
-          if (!isNaN(height)) analysis.pushup.height = height;
-        }
-
-        // Format the prompt data, filtering out undefined/NaN values
-        const promptData = {
+        return {
           timestamp: Date.now(),
-          analysis: {
-            pushup: Object.entries(analysis.pushup)
-              .filter(
-                ([_, v]) =>
-                  v != null &&
-                  (typeof v === "number"
-                    ? !isNaN(v)
-                    : Object.values(v).every((x) => !isNaN(x)))
-              )
-              .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {}),
-          },
+          analysis,
           keypoints: Object.values(kp)
             .filter(
               (point) =>
@@ -607,8 +662,6 @@
               score: point.score,
             })),
         };
-
-        return promptData;
       }
 
       // Modify the detectPose function to include recording logic
@@ -692,18 +745,39 @@
 
               // Send to LLM every 2 seconds
               if (currentTime - lastRepTime >= REP_COOLDOWN) {
-                const prompt = `
+                const exerciseType =
+                  document.getElementById("exerciseSelect").value;
+                let prompt;
+
+                if (exerciseType === "pushups") {
+                  prompt = `
 Last 2 seconds of movement (10fps):
 ${recordedPoses
   .map(
     (frame, i) => `
 Frame ${i + 1}:
-Plank: ${frame.analysis.pushup.plankAlignment?.toFixed(1)}°
-Height: ${frame.analysis.pushup.height?.toFixed(1)}
+Plank: ${frame.analysis.pushup?.plankAlignment?.toFixed(1)}°
+Height: ${frame.analysis.pushup?.height?.toFixed(1)}
 `
   )
   .join("\n")}
 `;
+                } else if (exerciseType === "bicepCurls") {
+                  prompt = `
+Last 2 seconds of movement (10fps):
+${recordedPoses
+  .map(
+    (frame, i) => `
+Frame ${i + 1}:
+Left Arm Angle: ${frame.analysis.bicepCurls?.leftArmAngle?.toFixed(1)}°
+Right Arm Angle: ${frame.analysis.bicepCurls?.rightArmAngle?.toFixed(1)}°
+Left Tuck: ${frame.analysis.bicepCurls?.leftTuck?.toFixed(1)}
+Right Tuck: ${frame.analysis.bicepCurls?.rightTuck?.toFixed(1)}
+`
+  )
+  .join("\n")}
+`;
+                }
 
                 // Save prompt with timestamp
                 savedPrompts.push({
@@ -852,6 +926,7 @@ Height: ${frame.analysis.pushup.height?.toFixed(1)}
       // Update the getClaudeResponse function
       async function getClaudeResponse(prompt) {
         try {
+          const exerciseType = document.getElementById("exerciseSelect").value;
           const response = await fetch("http://localhost:4000/api/claude", {
             method: "POST",
             headers: {
@@ -859,6 +934,7 @@ Height: ${frame.analysis.pushup.height?.toFixed(1)}
             },
             body: JSON.stringify({
               prompt: prompt,
+              exerciseType: exerciseType,
             }),
           });
 

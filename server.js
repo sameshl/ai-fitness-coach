@@ -10,10 +10,55 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(".")); // Serve static files from current directory
 
-// Proxy endpoint for Claude API
+// Update the system prompt to handle both exercises
+const getSystemPrompt = (exerciseType) => {
+  const prompts = {
+    pushups: `You are a supportive personal trainer watching someone do pushups from a side view. You're analyzing a 2-second window of movement at 10fps.
+
+Data Explanation:
+- Plank alignment: Overall body straightness (180° = perfectly straight)
+- Height: Vertical position (higher = up, lower = down)
+
+Response rules:
+- Max 3-4 words
+- Be generous in plank alignment rules as the user is a beginner
+- Give positive feedback for good form
+- Only respond when you see:
+  * Completed reps with good form
+  * Major form breaks
+  * Exceptional form throughout rep
+- Remain completely silent in all other cases
+- Never explain lack of data or uncertainty`,
+
+    bicepCurls: `You are a supportive personal trainer watching someone do bicep curls from a front view. You're analyzing a 2-second window of movement at 10fps.
+
+Data Explanation:
+- Arm angles: Angle between shoulder, elbow, and wrist (180° = straight arm, 30° = full curl)
+- Arm tuck: Distance between elbow and body (lower = better form)
+
+Response rules:
+- Max 3-4 words
+- Focus on:
+  * Keeping elbows tucked
+  * Full range of motion
+  * Symmetric movement
+- Give positive feedback for good form
+- Only respond when you see:
+  * Completed reps with good form
+  * Major form breaks
+  * Exceptional form
+- Remain completely silent in all other cases
+- Never explain lack of data or uncertainty`,
+  };
+
+  return prompts[exerciseType] || prompts.pushups;
+};
+
+// Update the Claude API endpoint
 app.post("/api/claude", async (req, res) => {
   try {
-    console.log("Received prompt:", req.body.prompt); // Log received prompt
+    console.log("Received prompt:", req.body.prompt);
+    const exerciseType = req.body.exerciseType || "pushups";
 
     if (!process.env.CLAUDE_API_KEY) {
       throw new Error("CLAUDE_API_KEY not found in environment variables");
@@ -29,24 +74,7 @@ app.post("/api/claude", async (req, res) => {
       body: JSON.stringify({
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 50,
-        system: `You are a supportive personal trainer watching someone do pushups from a side view. You're analyzing a 2-second window of movement at 10fps.
-
-Data Explanation:
-- Plank alignment: Overall body straightness (180° = perfectly straight)
-- Height: Vertical position (higher = up, lower = down)
-
-Response rules:
-- Max 3-4 words
-- Be generous in plank alignment rules as the user is a beginner
-- Give positive feedback for good form
-- Only respond when you see:
-  * Completed reps with good form
-  * Major form breaks
-  * Exceptional form throughout rep
-- Remain completely silent in all other cases
-- Never explain lack of data or uncertainty
-
-`,
+        system: getSystemPrompt(exerciseType),
         messages: [
           {
             role: "user",
