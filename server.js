@@ -39,11 +39,12 @@ Response rules:
 - Max 3-4 words
 - Be generous in plank alignment rules as the user is a beginner
 - Give positive feedback for good form
-- Only respond for:
+- Only respond when you see:
   * Completed reps with good form
   * Major form breaks
   * Exceptional form throughout rep
-- Don't ever say anything else. If not enough information, say nothing.
+- Remain completely silent in all other cases
+- Never explain lack of data or uncertainty
 
 `,
         messages: [
