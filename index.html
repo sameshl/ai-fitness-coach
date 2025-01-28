@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>HeyGen Streaming API LiveKit (V2)</title>
+    <title>Amigos Demo!!</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -36,18 +36,6 @@
   <body class="bg-gray-100 p-5 font-sans">
     <div class="max-w-3xl mx-auto bg-white p-5 rounded-lg shadow-md">
       <div class="flex flex-wrap gap-2.5 mb-5">
-        <input
-          id="avatarID"
-          type="text"
-          placeholder="Avatar ID"
-          class="flex-1 min-w-[200px] p-2 border border-gray-300 rounded-md"
-        />
-        <input
-          id="voiceID"
-          type="text"
-          placeholder="Voice ID"
-          class="flex-1 min-w-[200px] p-2 border border-gray-300 rounded-md"
-        />
         <button
           id="startBtn"
           class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -59,27 +47,6 @@
           class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors"
         >
           Close
-        </button>
-      </div>
-
-      <div class="flex flex-wrap gap-2.5 mb-5">
-        <input
-          id="taskInput"
-          type="text"
-          placeholder="Enter text for avatar to speak"
-          class="flex-1 min-w-[200px] p-2 border border-gray-300 rounded-md"
-        />
-        <button
-          id="talkBtn"
-          class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors"
-        >
-          Talk (LLM)
-        </button>
-        <button
-          id="repeatBtn"
-          class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-        >
-          Repeat
         </button>
       </div>
 
@@ -99,6 +66,8 @@
         >
           <option value="pushups">Push-ups</option>
           <option value="bicepCurls">Bicep Curls</option>
+          <option value="calorieTracking">Calorie Tracking</option>
+          <option value="daveSings">Dave Sings</option>
         </select>
       </div>
 
@@ -122,7 +91,7 @@
       </div>
       <div
         id="status"
-        class="p-2.5 bg-gray-50 border border-gray-300 rounded-md h-[100px] overflow-y-auto font-mono text-sm"
+        class="p-2.5 bg-gray-50 border border-gray-300 rounded-md h-[300px] overflow-y-auto font-mono text-sm"
       ></div>
 
       <div class="flex gap-2 mt-4">
@@ -139,19 +108,13 @@
         >
           Download Recording
         </button>
-        <button
-          id="downloadPromptsBtn"
-          class="px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors hidden"
-        >
-          Download Prompts
-        </button>
       </div>
     </div>
 
     <script>
       // Configuration
       const API_CONFIG = {
-        apiKey: "ZjNjNDZlOTQ0N2NkNDI1Yzg1OWZmMjIyNGNiMzM5OWYtMTczNzg1OTM2Mw==",
+        apiKey: "N2Y4NDkyYzQxZTAzNDJiMjg0ZmMwNWEzOWNkNmQ0NjctMTcyOTMyMzAxOQ==",
         serverUrl: "https://api.heygen.com",
       };
 
@@ -174,15 +137,12 @@
       let lastRepTime = 0;
       const REP_COOLDOWN = 4000; // Changed from 4000ms to 2000ms (2 seconds)
       const FRAMES_PER_REP = 20; // Changed from 40 to 20 frames (2 seconds at 10fps)
-      let savedPrompts = [];
       let recordingStartTimeout = null;
+      let lastExerciseType = "";
 
       // DOM Elements
       const statusElement = document.getElementById("status");
       const mediaElement = document.getElementById("mediaElement");
-      const avatarID = document.getElementById("avatarID");
-      const voiceID = document.getElementById("voiceID");
-      const taskInput = document.getElementById("taskInput");
 
       // Helper function to update status
       function updateStatus(message) {
@@ -248,10 +208,7 @@
             },
             body: JSON.stringify({
               quality: "high",
-              avatar_name: avatarID.value,
-              voice: {
-                voice_id: voiceID.value,
-              },
+              avatar_name: "Bryan_FitnessCoach_public",
               version: "v2",
               video_encoding: "H264",
             }),
@@ -436,20 +393,6 @@
       document
         .querySelector("#closeBtn")
         .addEventListener("click", closeSession);
-      document.querySelector("#talkBtn").addEventListener("click", () => {
-        const text = taskInput.value.trim();
-        if (text) {
-          sendText(text, "talk");
-          taskInput.value = "";
-        }
-      });
-      document.querySelector("#repeatBtn").addEventListener("click", () => {
-        const text = taskInput.value.trim();
-        if (text) {
-          sendText(text, "repeat");
-          taskInput.value = "";
-        }
-      });
 
       // Add these functions before the event listeners
       async function initPoseDetection() {
@@ -779,12 +722,6 @@ Right Tuck: ${frame.analysis.bicepCurls?.rightTuck?.toFixed(1)}
 `;
                 }
 
-                // Save prompt with timestamp
-                savedPrompts.push({
-                  timestamp: new Date().toISOString(),
-                  prompt: prompt,
-                });
-
                 // Get response from Claude first
                 const claudeResponse = await getClaudeResponse(prompt);
 
@@ -807,17 +744,12 @@ Right Tuck: ${frame.analysis.bicepCurls?.rightTuck?.toFixed(1)}
       function showRecordingButtons() {
         document.getElementById("recordButton").classList.remove("hidden");
         document.getElementById("downloadButton").classList.remove("hidden");
-        document
-          .getElementById("downloadPromptsBtn")
-          .classList.remove("hidden");
       }
 
       // Update the record button click handler
       document.getElementById("recordButton").addEventListener("click", () => {
         const recordButton = document.getElementById("recordButton");
         const downloadButton = document.getElementById("downloadButton");
-        const downloadPromptsBtn =
-          document.getElementById("downloadPromptsBtn");
 
         if (!isRecording) {
           // Start recording after 2 second delay
@@ -828,7 +760,6 @@ Right Tuck: ${frame.analysis.bicepCurls?.rightTuck?.toFixed(1)}
             "hover:bg-red-600"
           );
           downloadButton.disabled = true;
-          downloadPromptsBtn.disabled = true;
 
           recordingStartTimeout = setTimeout(() => {
             isRecording = true;
@@ -850,7 +781,6 @@ Right Tuck: ${frame.analysis.bicepCurls?.rightTuck?.toFixed(1)}
             "hover:bg-purple-600"
           );
           downloadButton.disabled = false;
-          downloadPromptsBtn.disabled = false;
         }
       });
 
@@ -868,26 +798,6 @@ Right Tuck: ${frame.analysis.bicepCurls?.rightTuck?.toFixed(1)}
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
         });
-
-      document
-        .getElementById("downloadPromptsBtn")
-        .addEventListener("click", () => {
-          downloadPrompts();
-        });
-
-      // Add a function to download prompts
-      function downloadPrompts() {
-        const dataStr = JSON.stringify(savedPrompts, null, 2);
-        const blob = new Blob([dataStr], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `heygen_prompts_${new Date().toISOString()}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
 
       // Add this new function
       async function requestCameraPermission() {
@@ -949,6 +859,87 @@ Right Tuck: ${frame.analysis.bicepCurls?.rightTuck?.toFixed(1)}
           console.error("Claude API error:", error);
           updateStatus(`Claude API error: ${error.message}`);
           return null;
+        }
+      }
+
+      // Update the captureAndAnalyzeImage function
+      async function captureAndAnalyzeImage() {
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = poseVideo.videoWidth;
+        tempCanvas.height = poseVideo.videoHeight;
+        const ctx = tempCanvas.getContext("2d");
+
+        ctx.drawImage(poseVideo, 0, 0);
+        const base64Image = tempCanvas
+          .toDataURL("image/jpeg", 0.8)
+          .split(",")[1];
+
+        try {
+          const response = await fetch("http://localhost:4000/api/vision", {
+            // Updated endpoint
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              prompt:
+                "What food items are visible in this image? Please provide a brief description with estimated calories.",
+              image: base64Image,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+          console.log("GPT-4 Vision response:", data);
+
+          // Display the response through HeyGen
+          if (data.choices && data.choices[0].message.content) {
+            const response = data.choices[0].message.content + " (Meal logged)";
+            await sendText(response, "repeat");
+          }
+        } catch (error) {
+          console.error("GPT-4 Vision API error:", error);
+          updateStatus(`GPT-4 Vision API error: ${error.message}`);
+        }
+      }
+
+      // Add the event listener for exercise select
+      document
+        .getElementById("exerciseSelect")
+        .addEventListener("change", handleExerciseChange);
+
+      // Remove the click handler and update handleExerciseChange
+      async function handleExerciseChange(e) {
+        const currentExercise = e.target.value;
+
+        // Only trigger if it's actually a change to a different value
+        if (currentExercise !== lastExerciseType) {
+          if (currentExercise === "calorieTracking") {
+            await captureAndAnalyzeImage();
+          } else if (currentExercise === "daveSings") {
+            const lyrics = `Runnin' up the code, like Marathon,
+Peak XV, we the ones they call on,
+VC kings, bringin' tech to Babylon,
+Ideas spark hotter than a laser dawn.
+
+In the hackathon zone, minds collidin',
+Consumer AI dreams, we ridin',
+Backend frontin', APIs providin',
+Caffeine fueled nights, code never hidin'.
+
+Peak XV, where dreams ignite,
+Geek squads, all fueled by bytes,
+Bollywood dreams, silicon nights,
+VC clout, reachin' new heights.`;
+
+            await sendText(lyrics, "repeat");
+          }
+
+          // Update last selected exercise
+          lastExerciseType = currentExercise;
         }
       }
     </script>
