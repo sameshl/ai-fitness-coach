@@ -2,6 +2,12 @@
 
 An interactive fitness coaching application that uses AI to provide real-time feedback on exercise form.
 
+
+
+https://github.com/user-attachments/assets/90697616-0cac-4b28-8092-92bc653d5522
+
+
+
 ## Features
 
 - Real-time pose detection and analysis
