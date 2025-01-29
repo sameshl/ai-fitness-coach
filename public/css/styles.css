@@ -1,0 +1,19 @@
+.video-container {
+  position: relative;
+  display: block;
+  margin-bottom: 10px;
+}
+
+.pose-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+}
+
+/* Make sure inputs and buttons stack nicely on mobile */
+@media (max-width: 768px) {
+  .flex-wrap > * {
+    min-width: 100%;
+  }
+} 
